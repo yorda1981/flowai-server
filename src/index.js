@@ -10,6 +10,7 @@ const agentsRoutes = require('./routes/agents');
 const aiRoutes = require('./routes/ai');
 const webhookRoutes = require('./routes/webhook');
 const statsRoutes = require('./routes/stats');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 app.use(cors());
@@ -23,6 +24,7 @@ app.use('/api/messages', messagesRoutes);
 app.use('/api/agents', agentsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/webhook', webhookRoutes);
 
 // ─── Health check ───
