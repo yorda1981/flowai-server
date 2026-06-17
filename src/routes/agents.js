@@ -28,28 +28,48 @@ router.get('/:id/qrcode', auth, async (req, res) => {
   const { data: agent } = await supabase.from('agents')
     .select('*').eq('id', req.params.id).eq('tenant_id', req.tenant.id).single();
   if (!agent) return res.status(404).json({ error: 'Agente no encontrado' });
-  const instanceName = agent.evolution_instance;
+  
+  let instanceName = agent.evolution_instance;
   if (!instanceName) return res.status(400).json({ error: 'Sin instancia' });
 
-  // Crear instancia directamente sin verificar fetchInstances
+  // Eliminar instancia vieja si existe y recrear
+  try {
+    await axios.delete(`${EVOLUTION_URL}/instance/delete/${instanceName}`, { headers: evoHeaders });
+    await new Promise(r => setTimeout(r, 1000));
+  } catch(e) { /* no importa si no existe */ }
+
+  // Crear instancia nueva con timestamp fresco
+  const newInstanceName = `fi${agent.tenant_id.substring(0,6)}${Date.now().toString().slice(-6)}`;
   try {
     await axios.post(`${EVOLUTION_URL}/instance/create`, {
-      instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS'
+      instanceName: newInstanceName,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS'
     }, { headers: evoHeaders });
+    
+    // Actualizar nombre en BD
+    await supabase.from('agents').update({ evolution_instance: newInstanceName }).eq('id', agent.id);
+    instanceName = newInstanceName;
+    
     await new Promise(r => setTimeout(r, 3000));
   } catch(e) {
-    console.log('Create instance:', e.response?.data || e.message);
+    console.log('Create error:', e.response?.data || e.message);
+    return res.status(500).json({ error: 'Error creando instancia: ' + (e.response?.data?.message || e.message) });
   }
 
   // Obtener QR
   try {
     const qrRes = await axios.get(`${EVOLUTION_URL}/instance/connect/${instanceName}`, { headers: evoHeaders });
     const qrData = qrRes.data;
-    console.log('QR response:', JSON.stringify(qrData).substring(0, 200));
-    if (qrData?.base64 || qrData?.qrcode?.base64) {
-      return res.json({ base64: qrData.base64 || qrData.qrcode?.base64, code: qrData.code });
+    console.log('QR data:', JSON.stringify(qrData).substring(0, 300));
+    
+    const base64 = qrData?.base64 || qrData?.qrcode?.base64 || qrData?.qr?.base64;
+    const code = qrData?.code || qrData?.qrcode?.code || qrData?.qr?.code;
+    
+    if (base64 || code) {
+      return res.json({ base64, code });
     }
-    return res.json({ message: 'Sin QR disponible', raw: qrData });
+    return res.json({ message: 'QR generándose', raw: qrData });
   } catch(e) {
     console.log('QR error:', e.response?.data || e.message);
     return res.status(500).json({ error: e.response?.data?.message || e.message });
