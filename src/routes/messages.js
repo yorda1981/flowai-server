@@ -31,4 +31,32 @@ router.get('/conversation/:convId', auth, async (req, res) => {
   res.json(data);
 });
 
+// Tomar control humano de una conversación
+router.post('/conversation/:convId/take', auth, async (req, res) => {
+  const { convId } = req.params;
+  const { data, error } = await supabase.from('conversations')
+    .update({ status: 'open', assigned_to: req.tenant.name || req.tenant.email, updated_at: new Date() })
+    .eq('id', convId).eq('tenant_id', req.tenant.id).select().single();
+  if (error) return res.status(500).json({ error });
+  res.json(data);
+});
+
+// Devolver conversación al bot
+router.post('/conversation/:convId/bot', auth, async (req, res) => {
+  const { data, error } = await supabase.from('conversations')
+    .update({ status: 'bot', assigned_to: null, updated_at: new Date() })
+    .eq('id', req.params.convId).eq('tenant_id', req.tenant.id).select().single();
+  if (error) return res.status(500).json({ error });
+  res.json(data);
+});
+
+// Cerrar conversación
+router.post('/conversation/:convId/close', auth, async (req, res) => {
+  const { data, error } = await supabase.from('conversations')
+    .update({ status: 'closed', updated_at: new Date() })
+    .eq('id', req.params.convId).eq('tenant_id', req.tenant.id).select().single();
+  if (error) return res.status(500).json({ error });
+  res.json(data);
+});
+
 module.exports = router;
