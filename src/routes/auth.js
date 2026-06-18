@@ -14,8 +14,7 @@ router.post('/login', async (req, res) => {
 
   if (error || !tenant) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
-  // Para demo, aceptamos password "123456"
-  const valid = password === '123456' || await bcrypt.compare(password, tenant.password_hash);
+  const valid = await bcrypt.compare(password, tenant.password_hash);
   if (!valid) return res.status(401).json({ error: 'Credenciales incorrectas' });
 
   const token = jwt.sign(
