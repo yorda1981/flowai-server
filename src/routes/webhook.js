@@ -116,7 +116,7 @@ router.post('/evolution/:tenantId', async (req, res) => {
       try {
         const resp = await axios.post(
           `${evolutionUrl}/message/sendText/${agent.evolution_instance}`,
-          { number: phone, text: replyText },
+          { number: phone, text: replyText, options: { delay: 1000, presence: 'composing' } },
           { headers: { 'apikey': evolutionKey } }
         );
         console.log(`Enviado OK:`, resp.data);
