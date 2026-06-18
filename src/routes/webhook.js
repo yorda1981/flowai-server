@@ -18,7 +18,7 @@ async function getAIReply(message, systemPrompt, tenantId) {
   } else {
     const used = tenant.tokens_used || 0;
     const limit = PLAN_TOKENS[tenant.plan] || PLAN_TOKENS.free;
-    if (used >= limit) return '⚠️ Los créditos de IA se agotaron. El administrador debe configurar su API key.';
+    if (used >= limit) return 'Los créditos de IA se agotaron.';
   }
 
   try {
@@ -33,23 +33,23 @@ async function getAIReply(message, systemPrompt, tenantId) {
       await supabase.from('tenants').update({ tokens_used: (tenant.tokens_used||0) + tokens }).eq('id', tenantId);
     }
     return reply;
-  } catch { return null; }
+  } catch(e) { 
+    console.error('OpenAI error:', e.message);
+    return null; 
+  }
 }
 
-// Ruta Evolution API
 router.post('/evolution/:tenantId', async (req, res) => {
   res.sendStatus(200);
   try {
     const { tenantId } = req.params;
     const body = req.body;
 
-    // Solo procesar messages.upsert
     if (body.event !== 'messages.upsert') return;
 
     const data = body.data;
     if (!data) return;
 
-    // Ignorar mensajes propios y de grupos
     if (data.key?.fromMe) return;
     const remoteJid = data.key?.remoteJid || '';
     if (remoteJid.includes('@g.us')) return;
@@ -59,20 +59,14 @@ router.post('/evolution/:tenantId', async (req, res) => {
                  data.message?.extendedTextMessage?.text || '';
     const senderName = data.pushName || phone;
 
+    console.log(`Mensaje de ${phone}: ${text}`);
+
     if (!phone || !text) return;
 
-    // Verificar si el número está bloqueado
     const { data: blocked } = await supabase.from('blocked_numbers')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .eq('phone', phone)
-      .maybeSingle();
-    if (blocked) {
-      console.log(`Número bloqueado ignorado: ${phone}`);
-      return;
-    }
+      .select('id').eq('tenant_id', tenantId).eq('phone', phone).maybeSingle();
+    if (blocked) { console.log(`Bloqueado: ${phone}`); return; }
 
-    // Guardar/buscar contacto
     let { data: contact } = await supabase.from('contacts')
       .select('*').eq('tenant_id', tenantId).eq('phone', phone).single();
     if (!contact) {
@@ -81,7 +75,6 @@ router.post('/evolution/:tenantId', async (req, res) => {
       contact = nc;
     }
 
-    // Guardar/buscar conversación
     let { data: conv } = await supabase.from('conversations')
       .select('*').eq('tenant_id', tenantId).eq('contact_id', contact.id).eq('status','open').single();
     if (!conv) {
@@ -90,13 +83,11 @@ router.post('/evolution/:tenantId', async (req, res) => {
       conv = nc;
     }
 
-    // Guardar mensaje entrante
     await supabase.from('messages').insert([{
       tenant_id: tenantId, conversation_id: conv.id,
       contact_id: contact.id, content: text, direction:'inbound', sent_by:'contact'
     }]);
 
-    // Obtener respuesta IA
     const { data: flows } = await supabase.from('flows')
       .select('*').eq('tenant_id', tenantId).eq('status','active').limit(1);
 
@@ -104,18 +95,15 @@ router.post('/evolution/:tenantId', async (req, res) => {
     if (flows?.length > 0) {
       const flow = flows[0];
       const aiNode = flow.nodes?.find(n => n.type==='ai');
-      if (aiNode) {
-        replyText = await getAIReply(text, aiNode.sub||'Eres un asistente amable y breve.', tenantId) || '';
-      }
+      if (aiNode) replyText = await getAIReply(text, aiNode.sub||'Eres un asistente amable y breve.', tenantId) || '';
       if (!replyText) {
         const msgNode = flow.nodes?.find(n => n.type==='message');
-        replyText = msgNode?.sub || '¡Hola! ¿En qué puedo ayudarte?';
+        replyText = msgNode?.sub || 'Hola! En que puedo ayudarte?';
       }
     } else {
-      replyText = '¡Hola! Recibimos tu mensaje. En breve te atendemos.';
+      replyText = 'Hola! Recibimos tu mensaje. En breve te atendemos.';
     }
 
-    // Buscar agente y enviar respuesta via Evolution API
     const { data: agent } = await supabase.from('agents')
       .select('*').eq('tenant_id', tenantId).eq('channel','whatsapp').single();
 
@@ -123,11 +111,19 @@ router.post('/evolution/:tenantId', async (req, res) => {
       const evolutionUrl = process.env.EVOLUTION_URL;
       const evolutionKey = process.env.EVOLUTION_KEY;
 
-      await axios.post(
-        `${evolutionUrl}/message/sendText/${agent.evolution_instance}`,
-        { number: phone, text: replyText },
-        { headers: { 'apikey': evolutionKey } }
-      );
+      console.log(`Enviando a ${phone} via ${agent.evolution_instance}`);
+
+      try {
+        const resp = await axios.post(
+          `${evolutionUrl}/message/sendText/${agent.evolution_instance}`,
+          { number: phone, textMessage: { text: replyText } },
+          { headers: { 'apikey': evolutionKey } }
+        );
+        console.log(`Enviado OK:`, resp.data);
+      } catch(sendErr) {
+        console.error(`Error enviando:`, JSON.stringify(sendErr.response?.data || sendErr.message));
+        return;
+      }
 
       await supabase.from('messages').insert([{
         tenant_id: tenantId, conversation_id: conv.id,
@@ -137,7 +133,6 @@ router.post('/evolution/:tenantId', async (req, res) => {
   } catch(e) { console.error('Webhook error:', e.message); }
 });
 
-// Rutas para gestión de números bloqueados
 router.get('/blocked/:tenantId', async (req, res) => {
   try {
     const { tenantId } = req.params;
@@ -170,9 +165,6 @@ router.delete('/blocked/:tenantId/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Ruta vieja por compatibilidad
-router.post('/whatsapp/:tenantId', async (req, res) => {
-  res.sendStatus(200);
-});
+router.post('/whatsapp/:tenantId', async (req, res) => { res.sendStatus(200); });
 
 module.exports = router;
