@@ -9,6 +9,7 @@ const agentsRoutes = require('./routes/agents');
 const aiRoutes = require('./routes/ai');
 const webhookRoutes = require('./routes/webhook');
 const statsRoutes = require('./routes/stats');
+const campaignsRoutes = require('./routes/campaigns');
 const adminRoutes = require('./routes/admin');
 
 const app = express();
@@ -24,6 +25,7 @@ app.use('/api/agents', agentsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/campaigns', campaignsRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/api/webhook', webhookRoutes); // rutas de bloqueados y gestión
 
