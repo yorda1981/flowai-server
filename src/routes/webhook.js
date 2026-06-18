@@ -18,7 +18,7 @@ async function getAIReply(message, systemPrompt, tenantId) {
   } else {
     const used = tenant.tokens_used || 0;
     const limit = PLAN_TOKENS[tenant.plan] || PLAN_TOKENS.free;
-    if (used >= limit) return '⚠️ Los créditos de IA se agotaron.';
+    if (used >= limit) return '⚠️ Los créditos de IA se agotaron. El administrador debe configurar su API key.';
   }
 
   try {
@@ -52,14 +52,25 @@ router.post('/evolution/:tenantId', async (req, res) => {
     // Ignorar mensajes propios y de grupos
     if (data.key?.fromMe) return;
     const remoteJid = data.key?.remoteJid || '';
-    if (remoteJid.includes('@g.us')) return; // ignorar grupos
+    if (remoteJid.includes('@g.us')) return;
 
     const phone = remoteJid.replace('@s.whatsapp.net', '');
-    const text = data.message?.conversation || 
+    const text = data.message?.conversation ||
                  data.message?.extendedTextMessage?.text || '';
     const senderName = data.pushName || phone;
 
     if (!phone || !text) return;
+
+    // Verificar si el número está bloqueado
+    const { data: blocked } = await supabase.from('blocked_numbers')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('phone', phone)
+      .maybeSingle();
+    if (blocked) {
+      console.log(`Número bloqueado ignorado: ${phone}`);
+      return;
+    }
 
     // Guardar/buscar contacto
     let { data: contact } = await supabase.from('contacts')
@@ -104,7 +115,7 @@ router.post('/evolution/:tenantId', async (req, res) => {
       replyText = '¡Hola! Recibimos tu mensaje. En breve te atendemos.';
     }
 
-    // Buscar agente con Evolution API
+    // Buscar agente y enviar respuesta via Evolution API
     const { data: agent } = await supabase.from('agents')
       .select('*').eq('tenant_id', tenantId).eq('channel','whatsapp').single();
 
@@ -126,7 +137,40 @@ router.post('/evolution/:tenantId', async (req, res) => {
   } catch(e) { console.error('Webhook error:', e.message); }
 });
 
-// Mantener ruta vieja por compatibilidad
+// Rutas para gestión de números bloqueados
+router.get('/blocked/:tenantId', async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { data, error } = await supabase.from('blocked_numbers')
+      .select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/blocked/:tenantId', async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const { phone, reason } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Phone requerido' });
+    const { data, error } = await supabase.from('blocked_numbers')
+      .insert([{ tenant_id: tenantId, phone: phone.trim(), reason: reason || '' }]).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/blocked/:tenantId/:id', async (req, res) => {
+  try {
+    const { tenantId, id } = req.params;
+    const { error } = await supabase.from('blocked_numbers')
+      .delete().eq('id', id).eq('tenant_id', tenantId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ruta vieja por compatibilidad
 router.post('/whatsapp/:tenantId', async (req, res) => {
   res.sendStatus(200);
 });
