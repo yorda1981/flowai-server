@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-
 const authRoutes = require('./routes/auth');
 const contactsRoutes = require('./routes/contacts');
 const flowsRoutes = require('./routes/flows');
@@ -26,6 +25,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/webhook', webhookRoutes);
+app.use('/api/webhook', webhookRoutes); // rutas de bloqueados y gestión
 
 // ─── Health check ───
 app.get('/', (req, res) => {
