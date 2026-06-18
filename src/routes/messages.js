@@ -20,4 +20,15 @@ router.get('/conversations', auth, async (req, res) => {
   res.json(data);
 });
 
+router.get('/conversation/:convId', auth, async (req, res) => {
+  const { convId } = req.params;
+  const { data, error } = await supabase.from('messages')
+    .select('*')
+    .eq('tenant_id', req.tenant.id)
+    .eq('conversation_id', convId)
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error });
+  res.json(data);
+});
+
 module.exports = router;
