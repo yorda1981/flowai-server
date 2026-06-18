@@ -22,8 +22,16 @@ router.post('/', auth, async (req, res) => {
   res.json(data);
 });
 
-// Actualizar contacto
+// Actualizar contacto (completo)
 router.put('/:id', auth, async (req, res) => {
+  const { data, error } = await supabase.from('contacts')
+    .update(req.body).eq('id', req.params.id).eq('tenant_id', req.tenant.id).select().single();
+  if (error) return res.status(500).json({ error });
+  res.json(data);
+});
+
+// Actualizar contacto (parcial - etiquetas, etc)
+router.patch('/:id', auth, async (req, res) => {
   const { data, error } = await supabase.from('contacts')
     .update(req.body).eq('id', req.params.id).eq('tenant_id', req.tenant.id).select().single();
   if (error) return res.status(500).json({ error });
