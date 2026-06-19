@@ -105,39 +105,112 @@ router.post('/evolution/:tenantId', async (req, res) => {
       return;
     }
 
-    // Obtener respuesta IA
+    // Obtener flujo activo
     const { data: flows } = await supabase.from('flows')
       .select('*').eq('tenant_id', tenantId).eq('status','active').limit(1);
 
-    let replyText = '';
-    if (flows?.length > 0) {
-      const flow = flows[0];
-      const aiNode = flow.nodes?.find(n => n.type==='ai');
-      if (aiNode) {
-        replyText = await getAIReply(text, aiNode.sub||'Eres un asistente amable y breve.', tenantId) || '';
+    if (!flows?.length) {
+      // Sin flujo activo — respuesta genérica
+      const { data: agent } = await supabase.from('agents')
+        .select('*').eq('tenant_id', tenantId).eq('channel','whatsapp').single();
+      if (agent?.evolution_instance) {
+        await axios.post(`${process.env.EVOLUTION_URL}/message/sendText/${agent.evolution_instance}`,
+          { number: phone, text: '¡Hola! Recibimos tu mensaje. En breve te atendemos.' },
+          { headers: { 'apikey': process.env.EVOLUTION_KEY } });
       }
-      if (!replyText) {
-        const msgNode = flow.nodes?.find(n => n.type==='message');
-        replyText = msgNode?.sub || '¡Hola! ¿En qué puedo ayudarte?';
-      }
-    } else {
-      replyText = '¡Hola! Recibimos tu mensaje. En breve te atendemos.';
+      return;
     }
 
-    // Buscar agente y enviar respuesta via Evolution API
+    const flow = flows[0];
+    const nodes = flow.nodes || [];
+    const currentStep = conv.flow_step || 0;
+    const flowData = conv.flow_data || {};
+
+    // Buscar nodos capture en orden
+    const captureNodes = nodes.filter(n => n.type === 'capture');
+    const aiNode = nodes.find(n => n.type === 'ai');
+    const msgNode = nodes.find(n => n.type === 'message');
+
+    let replyText = '';
+
+    // Si hay nodos capture y aún no los completamos todos
+    if (captureNodes.length > 0 && currentStep < captureNodes.length) {
+      const currentCapture = captureNodes[currentStep];
+
+      // Guardar la respuesta del paso anterior (si no es el primer mensaje)
+      if (currentStep > 0 || flowData.capturing) {
+        const prevCapture = captureNodes[currentStep - 1] || (flowData.capturing ? captureNodes[0] : null);
+        if (prevCapture && flowData.capturing) {
+          const field = prevCapture.field || 'custom';
+          if (field === 'name') {
+            await supabase.from('contacts').update({ name: text }).eq('id', contact.id);
+          } else if (field === 'email') {
+            await supabase.from('contacts').update({ email: text }).eq('id', contact.id);
+          } else {
+            const newData = { ...(contact.custom_data || {}), [field]: text };
+            await supabase.from('contacts').update({ custom_data: newData }).eq('id', contact.id);
+          }
+
+          // Avanzar al siguiente paso
+          const nextStep = currentStep + (flowData.capturing ? 1 : 0);
+          if (nextStep >= captureNodes.length) {
+            // Todos los datos capturados — responder con IA o mensaje final
+            await supabase.from('conversations').update({ flow_step: nextStep, flow_data: {} }).eq('id', conv.id);
+            if (aiNode) {
+              replyText = await getAIReply(text, aiNode.sub || 'Eres un asistente amable y breve.', tenantId) || '';
+            }
+            if (!replyText) replyText = msgNode?.sub || '¡Gracias! Ya tenemos tus datos.';
+          } else {
+            // Hacer la siguiente pregunta
+            const nextCapture = captureNodes[nextStep];
+            replyText = nextCapture.sub || `¿Cuál es tu ${nextCapture.field || 'dato'}?`;
+            await supabase.from('conversations').update({ flow_step: nextStep, flow_data: { capturing: true } }).eq('id', conv.id);
+          }
+        } else {
+          // Primera vez — hacer la primera pregunta
+          replyText = currentCapture.sub || `¿Cuál es tu ${currentCapture.field || 'nombre'}?`;
+          await supabase.from('conversations').update({ flow_step: 0, flow_data: { capturing: true } }).eq('id', conv.id);
+        }
+      } else {
+        // Primera vez — hacer la primera pregunta
+        replyText = currentCapture.sub || `¿Cuál es tu ${currentCapture.field || 'nombre'}?`;
+        await supabase.from('conversations').update({ flow_step: 0, flow_data: { capturing: true } }).eq('id', conv.id);
+      }
+    } else if (flowData.capturing && captureNodes.length > 0) {
+      // Guardar último dato capturado
+      const lastCapture = captureNodes[currentStep] || captureNodes[captureNodes.length - 1];
+      const field = lastCapture?.field || 'custom';
+      if (field === 'name') {
+        await supabase.from('contacts').update({ name: text }).eq('id', contact.id);
+      } else if (field === 'email') {
+        await supabase.from('contacts').update({ email: text }).eq('id', contact.id);
+      } else {
+        const newData = { ...(contact.custom_data || {}), [field]: text };
+        await supabase.from('contacts').update({ custom_data: newData }).eq('id', contact.id);
+      }
+      await supabase.from('conversations').update({ flow_step: captureNodes.length, flow_data: {} }).eq('id', conv.id);
+      if (aiNode) {
+        replyText = await getAIReply(text, aiNode.sub || 'Eres un asistente amable y breve.', tenantId) || '';
+      }
+      if (!replyText) replyText = msgNode?.sub || '¡Gracias! Ya tenemos tus datos.';
+    } else {
+      // Sin capture nodes — flujo normal con IA
+      if (aiNode) {
+        replyText = await getAIReply(text, aiNode.sub || 'Eres un asistente amable y breve.', tenantId) || '';
+      }
+      if (!replyText) replyText = msgNode?.sub || '¡Hola! ¿En qué puedo ayudarte?';
+    }
+
+    // Enviar respuesta via Evolution API
     const { data: agent } = await supabase.from('agents')
       .select('*').eq('tenant_id', tenantId).eq('channel','whatsapp').single();
 
     if (agent?.evolution_instance && replyText) {
-      const evolutionUrl = process.env.EVOLUTION_URL;
-      const evolutionKey = process.env.EVOLUTION_KEY;
-
       await axios.post(
-        `${evolutionUrl}/message/sendText/${agent.evolution_instance}`,
+        `${process.env.EVOLUTION_URL}/message/sendText/${agent.evolution_instance}`,
         { number: phone, text: replyText },
-        { headers: { 'apikey': evolutionKey } }
+        { headers: { 'apikey': process.env.EVOLUTION_KEY } }
       );
-
       await supabase.from('messages').insert([{
         tenant_id: tenantId, conversation_id: conv.id,
         contact_id: contact.id, content: replyText, direction:'outbound', sent_by:'ai'
