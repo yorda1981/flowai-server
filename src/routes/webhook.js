@@ -196,7 +196,13 @@ router.post('/evolution/:tenantId', async (req, res) => {
     } else {
       // Sin capture nodes — flujo normal con IA
       if (aiNode) {
-        replyText = await getAIReply(text, aiNode.sub || 'Eres un asistente amable y breve.', tenantId) || '';
+        // Cargar base de conocimiento del tenant
+        const { data: tenantData } = await supabase.from('tenants').select('knowledge_base').eq('id', tenantId).single();
+        let systemPrompt = aiNode.sub || 'Eres un asistente amable y breve.';
+        if (tenantData?.knowledge_base) {
+          systemPrompt = `${systemPrompt}\n\nINFORMACIÓN DE LA EMPRESA (usa esto para responder preguntas de clientes):\n${tenantData.knowledge_base}`;
+        }
+        replyText = await getAIReply(text, systemPrompt, tenantId) || '';
       }
       if (!replyText) replyText = msgNode?.sub || '¡Hola! ¿En qué puedo ayudarte?';
     }
