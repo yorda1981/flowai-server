@@ -81,9 +81,12 @@ router.post('/evolution/:tenantId', async (req, res) => {
       contact = nc;
     }
 
-    // Guardar/buscar conversación
+    // Guardar/buscar conversación activa (bot u open)
     let { data: conv } = await supabase.from('conversations')
-      .select('*').eq('tenant_id', tenantId).eq('contact_id', contact.id).eq('status','open').single();
+      .select('*').eq('tenant_id', tenantId).eq('contact_id', contact.id)
+      .in('status', ['bot', 'open'])
+      .order('created_at', { ascending: false })
+      .limit(1).single();
     if (!conv) {
       const { data: nc } = await supabase.from('conversations')
         .insert([{ tenant_id: tenantId, contact_id: contact.id, status:'bot' }]).select().single();
@@ -96,7 +99,7 @@ router.post('/evolution/:tenantId', async (req, res) => {
       contact_id: contact.id, content: text, direction:'inbound', sent_by:'contact'
     }]);
 
-    // Si la conversación está asignada a un humano, NO responder con IA
+    // Si la conversación está en modo humano, NO responder con IA
     if (conv.status === 'open') {
       console.log(`Conversación ${conv.id} en modo humano — IA silenciada`);
       return;
