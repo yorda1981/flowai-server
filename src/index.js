@@ -12,6 +12,7 @@ const statsRoutes = require('./routes/stats');
 const campaignsRoutes = require('./routes/campaigns');
 const labelsRoutes = require('./routes/labels');
 const adminRoutes = require('./routes/admin');
+const configRoutes = require('./routes/config');
 
 const app = express();
 app.use(cors());
@@ -28,6 +29,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/labels', labelsRoutes);
+app.use('/api/config', configRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/api/webhook', webhookRoutes); // rutas de bloqueados y gestión
 
