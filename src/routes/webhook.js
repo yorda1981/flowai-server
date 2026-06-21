@@ -3,7 +3,7 @@ const supabase = require('../supabase');
 const axios = require('axios');
 const router = express.Router();
 
-const PLAN_TOKENS = { starter:10000, pro:50000, business:100000, free:5000, trial:3000 };
+const PLAN_TOKENS = { trial:3000, starter:10000, pro:50000, business:150000, free:3000, blocked:0 };
 
 // Palabras clave para detectar intención de agendar
 const BOOKING_KEYWORDS = [
