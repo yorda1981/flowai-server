@@ -16,12 +16,34 @@ const configRoutes = require('./routes/config');
 const appointmentsRoutes = require('./routes/appointments');
 const paymentsRoutes = require('./routes/payments');
 
+// ─── Validar variáveis obrigatórias ───
+const REQUIRED_ENV = ['SUPABASE_URL','SUPABASE_SECRET_KEY','JWT_SECRET','OPENAI_API_KEY','EVOLUTION_URL','EVOLUTION_KEY','ADMIN_SECRET_KEY'];
+const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missing.length > 0) {
+  console.error('❌ Variáveis de ambiente obrigatórias não definidas:', missing.join(', '));
+  process.exit(1);
+}
+
 const app = express();
+
+// ─── CORS restrito ao domínio de produção ───
+const allowedOrigins = [
+  'https://nexacrm.ia.br',
+  'https://www.nexacrm.ia.br',
+  'https://flowai-frontend-gray.vercel.app',
+];
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, webhook calls)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('CORS não permitido para: ' + origin));
+  },
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','x-admin-key']
 }));
+
 app.use(express.json());
 
 // ─── Rutas ───
@@ -39,14 +61,14 @@ app.use('/api/config', configRoutes);
 app.use('/api/appointments', appointmentsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/webhook', webhookRoutes);
-app.use('/api/webhook', webhookRoutes); // rutas de bloqueados y gestión
+app.use('/api/webhook', webhookRoutes);
 
 // ─── Health check ───
 app.get('/', (req, res) => {
-  res.json({ status: 'FlowAI server funcionando ✅', version: '1.0.0' });
+  res.json({ status: 'NexaAI CRM server funcionando ✅', version: '1.0.0' });
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`✅ FlowAI Server corriendo en puerto ${PORT}`);
+  console.log(`✅ NexaAI CRM Server corriendo en puerto ${PORT}`);
 });
