@@ -362,6 +362,17 @@ router.post('/evolution/:tenantId', async (req, res) => {
         if (tenantData?.knowledge_base) {
           systemPrompt = `${systemPrompt}\n\nINFORMACIÓN DE LA EMPRESA:\n${tenantData.knowledge_base}`;
         }
+        // Injetar catálogo de produtos
+        const { data: products } = await supabase.from('products')
+          .select('name,description,price,category,in_stock')
+          .eq('tenant_id', tenantId).eq('in_stock', true)
+          .order('sort_order', { ascending: true });
+        if (products?.length) {
+          const catalog = products.map(p =>
+            `- ${p.name}${p.category?' ('+p.category+')':''}${p.price?' — R$'+Number(p.price).toFixed(2):''}${p.description?': '+p.description:''}`
+          ).join('\n');
+          systemPrompt = `${systemPrompt}\n\nCATÁLOGO DE PRODUTOS:\n${catalog}\n\nUse o catálogo acima para responder perguntas sobre produtos, preços e disponibilidade.`;
+        }
         replyText = await getAIReply(text, systemPrompt, tenantId) || '';
       }
       if (!replyText) replyText = msgNode?.sub || '¡Hola! ¿En qué puedo ayudarte?';
