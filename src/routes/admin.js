@@ -2,7 +2,11 @@ const express = require('express');
 const supabase = require('../supabase');
 const router = express.Router();
 
-const ADMIN_KEY = process.env.ADMIN_SECRET_KEY || 'flowai_admin_2024_super_secreto';
+const ADMIN_KEY = process.env.ADMIN_SECRET_KEY;
+if (!ADMIN_KEY) {
+  console.error('❌ ADMIN_SECRET_KEY não definida');
+  process.exit(1);
+}
 
 // Middleware de autenticación admin
 function adminAuth(req, res, next) {
