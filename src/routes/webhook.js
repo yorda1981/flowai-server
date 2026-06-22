@@ -2,6 +2,7 @@ const express = require('express');
 const supabase = require('../supabase');
 const axios = require('axios');
 const router = express.Router();
+const { resetFollowUp, updateLastContact } = require('./followup');
 
 // Rate limiting simples por IP
 const requestCounts = new Map();
@@ -270,6 +271,10 @@ router.post('/evolution/:tenantId', async (req, res) => {
       tenant_id: tenantId, conversation_id: conv.id,
       contact_id: contact.id, content: text, direction:'inbound', sent_by:'contact'
     }]);
+
+    // Atualizar last_contact_at e resetar follow-up (contato respondeu)
+    await updateLastContact(conv.id);
+    if ((conv.followup_step || 0) > 0) await resetFollowUp(conv.id);
 
     // If human mode, don't reply
     if (conv.status === 'open') return;
