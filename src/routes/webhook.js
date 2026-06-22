@@ -3,6 +3,33 @@ const supabase = require('../supabase');
 const axios = require('axios');
 const router = express.Router();
 
+// Rate limiting simples por IP
+const requestCounts = new Map();
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1 minuto
+  const maxRequests = 60;
+  
+  if (!requestCounts.has(ip)) {
+    requestCounts.set(ip, { count: 1, start: now });
+    return next();
+  }
+  
+  const data = requestCounts.get(ip);
+  if (now - data.start > windowMs) {
+    requestCounts.set(ip, { count: 1, start: now });
+    return next();
+  }
+  
+  if (data.count >= maxRequests) {
+    return res.status(429).json({ error: 'Muitas requisições. Tente novamente em 1 minuto.' });
+  }
+  
+  data.count++;
+  next();
+}
+
 const PLAN_TOKENS = { trial:3000, starter:10000, pro:50000, business:150000, free:3000, blocked:0 };
 
 // Palabras clave para detectar intención de agendar
@@ -191,6 +218,13 @@ router.post('/evolution/:tenantId', async (req, res) => {
     const { tenantId } = req.params;
     const body = req.body;
 
+    // Verify Evolution API key
+    const apikey = req.headers['apikey'] || req.headers['x-api-key'];
+    if (!apikey || apikey !== process.env.EVOLUTION_KEY) {
+      console.log('Webhook rejeitado: apikey inválida');
+      return;
+    }
+
     if (body.event !== 'messages.upsert') return;
     const data = body.data;
     if (!data) return;
@@ -338,8 +372,24 @@ router.post('/evolution/:tenantId', async (req, res) => {
   } catch(e) { console.error('Webhook error:', e.message); }
 });
 
-// ─── BLOCKED NUMBERS ───
-router.get('/blocked/:tenantId', async (req, res) => {
+// ─── BLOCKED NUMBERS (com autenticação por token) ───
+const jwt = require('jsonwebtoken');
+
+function tenantAuth(req, res, next) {
+  const auth = req.headers['authorization'];
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Token requerido' });
+  try {
+    const decoded = jwt.verify(auth.split(' ')[1], process.env.JWT_SECRET);
+    // Validate that the token matches the tenantId in the URL
+    if (decoded.id !== req.params.tenantId) return res.status(403).json({ error: 'Acesso negado' });
+    req.tenant = decoded;
+    next();
+  } catch(e) {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+}
+
+router.get('/blocked/:tenantId', tenantAuth, async (req, res) => {
   try {
     const { data, error } = await supabase.from('blocked_numbers')
       .select('*').eq('tenant_id', req.params.tenantId).order('created_at', { ascending: false });
@@ -348,7 +398,7 @@ router.get('/blocked/:tenantId', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/blocked/:tenantId', async (req, res) => {
+router.post('/blocked/:tenantId', rateLimit, tenantAuth, async (req, res) => {
   try {
     const { phone, reason } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone requerido' });
@@ -359,7 +409,7 @@ router.post('/blocked/:tenantId', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.delete('/blocked/:tenantId/:id', async (req, res) => {
+router.delete('/blocked/:tenantId/:id', tenantAuth, async (req, res) => {
   try {
     const { error } = await supabase.from('blocked_numbers')
       .delete().eq('id', req.params.id).eq('tenant_id', req.params.tenantId);
