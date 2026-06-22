@@ -17,6 +17,7 @@ const appointmentsRoutes = require('./routes/appointments');
 const paymentsRoutes = require('./routes/payments');
 const followupRoutes = require('./routes/followup_api');
 const { startFollowUpCron } = require('./routes/followup');
+const productsRoutes = require('./routes/products');
 
 // ─── Validar variáveis obrigatórias ───
 const REQUIRED_ENV = ['SUPABASE_URL','SUPABASE_SECRET_KEY','JWT_SECRET','OPENAI_API_KEY','EVOLUTION_URL','EVOLUTION_KEY','ADMIN_SECRET_KEY'];
@@ -63,6 +64,7 @@ app.use('/api/config', configRoutes);
 app.use('/api/appointments', appointmentsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/followup', followupRoutes);
+app.use('/api/products', productsRoutes);
 app.use('/webhook', webhookRoutes);
 app.use('/api/webhook', webhookRoutes);
 
