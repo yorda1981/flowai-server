@@ -2,7 +2,7 @@
 // Cron de follow-up automático: roda a cada 30 minutos
 // Verifica conversas paradas e envia mensagens de acompanhamento
 
-const supabase = require('./supabase');
+const supabase = require('../supabase');
 const axios    = require('axios');
 
 async function sendMessage(evolutionInstance, phone, text) {
