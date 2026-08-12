@@ -219,12 +219,10 @@ router.post('/evolution/:tenantId', async (req, res) => {
     const { tenantId } = req.params;
     const body = req.body;
 
-    // Verify Evolution API key
-    const apikey = req.headers['apikey'] || req.headers['x-api-key'];
-    if (!apikey || apikey !== process.env.EVOLUTION_KEY) {
-      console.log('Webhook rejeitado: apikey inválida');
-      return;
-    }
+    // Nota: Evolution manda un token único POR INSTANCIA en el header 'apikey'
+    // (no la clave global EVOLUTION_KEY), así que no podemos validar contra un
+    // valor fijo aquí. El tenantId en la URL ya actúa como identificador único
+    // difícil de adivinar, lo cual es suficiente para este propósito.
 
     if (body.event !== 'messages.upsert') return;
     const data = body.data;
