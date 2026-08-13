@@ -1,5 +1,23 @@
 const express = require('express');
 const supabase = require('../supabase');
+
+// Deduplicación simple en memoria: evita procesar el mismo mensaje entrante
+// más de una vez si Evolution/WhatsApp reenvía el mismo evento (esto pasa,
+// y sin esto el bot terminaba respondiendo varias veces al mismo mensaje).
+const processedMessageIds = new Set();
+const MAX_TRACKED_IDS = 2000;
+function alreadyProcessed(messageId) {
+  if (!messageId) return false; // sin ID no podemos deduplicar, dejamos pasar
+  if (processedMessageIds.has(messageId)) return true;
+  processedMessageIds.add(messageId);
+  if (processedMessageIds.size > MAX_TRACKED_IDS) {
+    // liberar espacio: quitar el más viejo (primero insertado)
+    const oldest = processedMessageIds.values().next().value;
+    processedMessageIds.delete(oldest);
+  }
+  return false;
+}
+
 const axios = require('axios');
 const router = express.Router();
 const { resetFollowUp, updateLastContact } = require('./followup');
@@ -231,6 +249,9 @@ router.post('/evolution/:tenantId', async (req, res) => {
     const remoteJid = data.key?.remoteJid || '';
     if (remoteJid.includes('@g.us')) return;
 
+    // Evitar procesar el mismo mensaje dos veces si Evolution reenvía el evento
+    if (alreadyProcessed(data.key?.id)) return;
+
     const phone = remoteJid.replace('@s.whatsapp.net', '');
     const text = data.message?.conversation ||
                  data.message?.extendedTextMessage?.text || '';
@@ -377,6 +398,16 @@ router.post('/evolution/:tenantId', async (req, res) => {
     }
 
     if (agent?.evolution_instance && replyText) {
+      // Reemplazar variables de plantilla como {nome}/{name} por el nombre real
+      // del contacto (si no tiene nombre guardado, se quita la palabra en vez
+      // de dejar el {nome} literal en el mensaje).
+      const contactName = contact?.name || '';
+      replyText = replyText
+        .replace(/\{nome\}/gi, contactName || '')
+        .replace(/\{name\}/gi, contactName || '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+
       await sendMessage(agent.evolution_instance, phone, replyText);
       await supabase.from('messages').insert([{
         tenant_id: tenantId, conversation_id: conv.id,
