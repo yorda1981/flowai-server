@@ -75,28 +75,42 @@ async function runFollowUp() {
         if (conv.followup_step >= nextRule.step) continue;
 
         try {
+          const contactName = conv.contacts?.name || '';
+          const personalizedMessage = nextRule.message
+            .replace(/\{nome\}/gi, contactName || 'tudo bem')
+            .replace(/\{name\}/gi, contactName || 'there');
+
+          const maxStep = Math.max(...tenantRules.map(r => r.step));
+          const newStatus = nextRule.step >= maxStep ? 'closed' : 'bot';
+
+          // Reservamos el paso ANTES de enviar: si dos ejecuciones corrieran casi
+          // al mismo tiempo (ej. por un redeploy solapado), la segunda va a ver
+          // que este paso ya fue tomado (condición de arriba: conv.followup_step
+          // >= nextRule.step) y no va a duplicar el envío.
+          const { data: claimed } = await supabase.from('conversations')
+            .update({
+              followup_step:    nextRule.step,
+              followup_sent_at: now.toISOString(),
+              status:           newStatus
+            })
+            .eq('id', conv.id)
+            .lt('followup_step', nextRule.step)
+            .select();
+
+          if (!claimed?.length) continue; // otro proceso ya lo tomó, no reenviar
+
           // Enviar mensagem
-          await sendMessage(agent.evolution_instance, phone, nextRule.message);
+          await sendMessage(agent.evolution_instance, phone, personalizedMessage);
 
           // Salvar mensagem no histórico
           await supabase.from('messages').insert([{
             tenant_id: tenantId,
             conversation_id: conv.id,
             contact_id: conv.contact_id,
-            content: nextRule.message,
+            content: personalizedMessage,
             direction: 'outbound',
             sent_by: 'followup'
           }]);
-
-          // Atualizar step do follow-up na conversa
-          const maxStep = Math.max(...tenantRules.map(r => r.step));
-          const newStatus = nextRule.step >= maxStep ? 'closed' : 'bot';
-
-          await supabase.from('conversations').update({
-            followup_step:    nextRule.step,
-            followup_sent_at: now.toISOString(),
-            status:           newStatus
-          }).eq('id', conv.id);
 
           console.log(`[FollowUp] Tenant ${tenantId} | Contato ${phone} | Step ${nextRule.step} enviado${newStatus==='closed'?' → conversa fechada':''}`);
 
@@ -132,7 +146,11 @@ async function updateLastContact(conversationId) {
 function startFollowUpCron() {
   const INTERVAL_MS = 30 * 60 * 1000; // 30 minutos
   console.log('[FollowUp] Cron iniciado — verificação a cada 30 minutos');
-  runFollowUp(); // Rodar imediatamente no startup
+  // Nota: NO corremos runFollowUp() inmediatamente al arrancar. Si lo hiciéramos,
+  // cada redeploy del servidor (que reinicia el proceso) dispararía un envío
+  // duplicado de follow-ups antes de que la base de datos alcance a registrar
+  // el envío anterior — esto fue justo lo que causó mensajes repetidos durante
+  // los deploys de hoy. Ahora solo corre según el intervalo programado.
   setInterval(runFollowUp, INTERVAL_MS);
 }
 
