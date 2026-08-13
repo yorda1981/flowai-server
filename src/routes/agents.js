@@ -8,6 +8,30 @@ const EVOLUTION_URL = process.env.EVOLUTION_URL || 'https://evolution-api-produc
 const EVOLUTION_KEY = process.env.EVOLUTION_KEY || 'flowai2024secretkey';
 const evoHeaders = { 'apikey': EVOLUTION_KEY, 'Content-Type': 'application/json' };
 const EVO_TIMEOUT = 15000; // ms — nunca dejar una llamada a Evolution colgada indefinidamente
+// URL pública de este mismo backend, para decirle a Evolution adónde mandar los mensajes entrantes.
+const BACKEND_PUBLIC_URL = process.env.BACKEND_PUBLIC_URL || 'https://flowai-server-production.up.railway.app';
+
+// Le dice a Evolution a qué URL debe mandar los eventos de mensajes (webhook).
+// Sin esto, WhatsApp puede quedar "Conectado" pero el bot nunca recibe ni
+// responde nada — esto fue justo lo que pasó al recrear la base de datos de
+// Evolution: la configuración de webhook por instancia se perdió y nada la
+// volvía a poner, así que la agregamos aquí, en cada creación/uso de instancia.
+async function ensureWebhook(instanceName, tenantId) {
+  try {
+    await axios.post(`${EVOLUTION_URL}/webhook/set/${instanceName}`, {
+      webhook: {
+        enabled: true,
+        url: `${BACKEND_PUBLIC_URL}/webhook/evolution/${tenantId}`,
+        events: ['MESSAGES_UPSERT'],
+        webhookByEvents: false,
+        webhookBase64: false
+      }
+    }, { headers: evoHeaders, timeout: EVO_TIMEOUT });
+  } catch (e) {
+    console.log('Webhook config error:', e.response?.data || e.message);
+    // No bloqueamos la generación del QR si esto falla, pero queda registrado en logs.
+  }
+}
 
 // Lock en memoria: evita que dos solicitudes de QR para el mismo agente
 // (ej. doble clic en el frontend) corran en paralelo y se pisen entre sí.
@@ -82,6 +106,8 @@ router.get('/:id/qrcode', auth, async (req, res) => {
           headers: evoHeaders, timeout: EVO_TIMEOUT
         });
         // Existe → no hace falta borrar/crear, solo pedimos el QR de nuevo sobre la misma instancia.
+        // Reafirmamos el webhook por si acaso (no tiene costo si ya estaba bien configurado).
+        await ensureWebhook(instanceName, agent.tenant_id);
       } catch (e) {
         needsCreate = true; // no existe o está rota en Evolution → hay que crearla de nuevo
       }
@@ -96,6 +122,7 @@ router.get('/:id/qrcode', auth, async (req, res) => {
           integration: 'WHATSAPP-BAILEYS'
         }, { headers: evoHeaders, timeout: EVO_TIMEOUT });
         await supabase.from('agents').update({ evolution_instance: instanceName }).eq('id', agent.id);
+        await ensureWebhook(instanceName, agent.tenant_id);
       } catch (e) {
         console.log('Create error:', e.response?.data || e.message);
         return res.status(500).json({ error: 'Error creando instancia: ' + (e.response?.data?.message || e.message) });
